@@ -1,4 +1,4 @@
-# version 1.1
+# version 1.2
 
 import requests
 import heapq
@@ -137,6 +137,40 @@ class PonyPanicClient:
                     print("NEXT STEP POS", next_step['y'], hero_pos['y'])
                     return "MOVE_DOWN"
         return "NOTHING"
+    
+    def get_enemy_positions(self, map_state):
+        """Return a list of enemy positions."""
+        return [enemy['position'] for enemy in map_state['map']['enemies']]
+    
+    def get_enemy_health(self, map_state):
+        """Return a list of enemy health."""
+        return [enemy['health'] for enemy in map_state['map']['enemies']]
+
+    def get_bullet_positions(self, map_state):
+        """Return a list of bullet positions."""
+        return [bullet['position'] for bullet in map_state['map']['bullets']]
+
+    def get_kick_direction(self, hero_pos, enemy_pos):
+        """Determine the direction to kick the enemy."""
+        if enemy_pos['x'] > hero_pos['x']:
+            return "KICK_RIGHT"
+        elif enemy_pos['x'] < hero_pos['x']:
+            return "KICK_LEFT"
+        elif enemy_pos['y'] > hero_pos['y']:
+            return "KICK_UP"
+        elif enemy_pos['y'] < hero_pos['y']:
+            return "KICK_DOWN"
+        return None
+
+    def is_bullet_threatening(self, hero_pos, bullet_pos):
+        """Determine if a bullet is about to hit the hero in the next move."""
+        if bullet_pos['x'] == hero_pos['x']:
+            if abs(bullet_pos['y'] - hero_pos['y']) == 1:
+                return True
+        elif bullet_pos['y'] == hero_pos['y']:
+            if abs(bullet_pos['x'] - hero_pos['x']) == 1:
+                return True
+        return False
 
     def play_game(self):
 
@@ -173,27 +207,48 @@ class PonyPanicClient:
 
             # Analyze the map and decide the next move
             hero = map_state['heroes'][0]['position']
+            enemies = self.get_enemy_positions(map_state)
+            bullets = self.get_bullet_positions(map_state)
             treasures = map_state['map']['treasures']
             noncollected_treasures = [t for t in treasures if t['collectedByHeroId'] is None]
 
-            if noncollected_treasures:
-                target = min(noncollected_treasures, key=lambda t: self.calculate_distance(hero, t['position']))
-                action = self.get_move_direction(hero, target['position'])
-                print("Action:", action)
-                try:
+            # Check if there's an enemy nearby to kick ass
+            for enemy in enemies:
+                if self.calculate_distance(hero, enemy) <= 2 and self.get_enemy_health(map_state)[0] > 0:
+                    action = self.get_kick_direction(hero, enemy)
+                    print(f"Enemy nearby! Action: {action}")
+                    print(f"Enemy helth: {self.get_enemy_health(map_state)}")
                     self.approve_hero_turn(action)
-                except requests.exceptions.HTTPError as e:
-                    if e.response.status_code == 409:
-                        error_data = e.response.json()
-                        if error_data.get('subName') == 'GAME_ON_MAP_IS_ALREADY_OVER':
-                            print("Game already over. Resetting level...")
-                            self.reset_level()
-                        else:
-                            raise
+                    break
 
+            # Check if there's a bullet threatening a hero
             else:
-                print("There are NO treasures, staying put.")
-                self.approve_hero_turn("NOTHING")
+                for bullet in bullets:
+                    if self.is_bullet_threatening(hero, bullet):
+                        print("Bullet nearby! Action: USE_SHIELD")
+                        self.approve_hero_turn("USE_SHIELD")
+                        break
+
+                # If no threats, move towards the nearest treasure
+                else:
+                    if noncollected_treasures:
+                        target = min(noncollected_treasures, key=lambda t: self.calculate_distance(hero, t['position']))
+                        action = self.get_move_direction(hero, target['position'])
+                        print("Action:", action)
+                        try:
+                            self.approve_hero_turn(action)
+                        except requests.exceptions.HTTPError as e:
+                            if e.response.status_code == 409:
+                                error_data = e.response.json()
+                                if error_data.get('subName') == 'GAME_ON_MAP_IS_ALREADY_OVER':
+                                    print("Game already over. Resetting level...")
+                                    self.reset_level()
+                                else:
+                                    raise
+
+                    else:
+                        print("There are NO treasures, staying put.")
+                        self.approve_hero_turn("NOTHING")
     
     def calculate_distance(self, pos1, pos2):
         return abs(pos1['x'] - pos2['x']) + abs(pos1['y'] - pos2['y'])
