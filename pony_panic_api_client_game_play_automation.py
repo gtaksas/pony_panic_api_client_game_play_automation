@@ -1,4 +1,4 @@
-# version 1.3
+# version 1.4
 
 import requests
 import heapq
@@ -189,6 +189,7 @@ class PonyPanicClient:
   \____/_/   \_\_|  |_|_____|  \___/  \_/  |_____|_| \_\\
                                                         """)
                 print(f"RESETTING LEVEL {self.get_playthrough_state()['currentLevel']}")
+                del self.map_resources
                 self.reset_level()
                 continue  # Start over with the same old new level
 
