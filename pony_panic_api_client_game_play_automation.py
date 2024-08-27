@@ -1,4 +1,4 @@
-# version 1.4
+# version 1.5
 
 import requests
 import heapq
@@ -12,6 +12,10 @@ class PonyPanicClient:
         }
         self.obstacles = {}
         self.data = {}
+
+        # Get the map direction from the most recent map_state
+        self.map_width = self.get_map_state()['map']['width']
+        self.map_height = self.get_map_state()['map']['height']
 
     def get_map_resources(self):
         response = requests.get(f'{self.base_url}/play/mapResource', headers=self.headers)
@@ -96,6 +100,12 @@ class PonyPanicClient:
         
         for direction in directions:
             neighbor = {'x': position['x'] + direction['x'], 'y': position['y'] + direction['y']}
+
+            # Skip if coordinates are out of bounds
+            if (neighbor['x'] < 0 or neighbor['x'] > self.map_width or neighbor['y'] < 0 or neighbor['y'] > self.map_height):
+                continue # Skip this neighbor as it's out of map bounds
+
+            # Check if the neighbor is walkable (not an obstacle)
             if self.is_field_empty(neighbor, self.obstacles):
                 neighbors.append(neighbor)
         
@@ -195,6 +205,18 @@ class PonyPanicClient:
 
             # Check if WON
             if map_state['map']['status'] == 'WON':
+                print("""
+ /$$    /$$    /$$ /$$             /$$   /$$ /$$$$$$$ 
+| $$   | $$   | $$| $$            | $$  | $$| $$__  $$
+| $$   | $$   | $$| $$            | $$  | $$| $$  \ $$
+| $$   |  $$ / $$/| $$            | $$  | $$| $$$$$$$/
+| $$    \  $$ $$/ | $$            | $$  | $$| $$____/ 
+| $$     \  $$$/  | $$            | $$  | $$| $$      
+| $$$$$$$$\  $/   | $$$$$$$$      |  $$$$$$/| $$      
+|________/ \_/    |________/       \______/ |__/      
+                                                      
+                                                      
+                                                      """)
                 print(f"LEVEL {self.get_playthrough_state()['currentLevel']} IS COMPLETED! Moving to the NEXT LEVEL...")
                 del self.map_resources
                 self.next_level()
