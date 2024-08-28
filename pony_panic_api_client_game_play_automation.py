@@ -1,4 +1,4 @@
-# version 1.5
+# version 1.6
 
 import requests
 import heapq
@@ -102,7 +102,7 @@ class PonyPanicClient:
             neighbor = {'x': position['x'] + direction['x'], 'y': position['y'] + direction['y']}
 
             # Skip if coordinates are out of bounds
-            if (neighbor['x'] < 0 or neighbor['x'] > self.map_width or neighbor['y'] < 0 or neighbor['y'] > self.map_height):
+            if (neighbor['x'] < 0 or neighbor['x'] >= self.map_width or neighbor['y'] < 0 or neighbor['y'] >= self.map_height):
                 continue # Skip this neighbor as it's out of map bounds
 
             # Check if the neighbor is walkable (not an obstacle)
