@@ -1,4 +1,11 @@
-# version 1.6
+# version 1.7.0 DEV 
+# THE ESCAPE - (Change to a DEFFENSIVE approach instead of an OFFENSIVE one)
+
+# Simply recalculating a new Path in every move to keep distance from enemies and bullets doesn't help.
+# The obstacles create squares. Maybe we should implement some logic to capture those squares and try to find path through the ones where there are no enemies.
+# We should use offensive tactics only when it's necessary.
+
+# This version includes features that take a path that keeps distance from threats
 
 import requests
 import heapq
@@ -13,26 +20,24 @@ class PonyPanicClient:
         self.obstacles = {}
         self.data = {}
 
-        # Get the map direction from the most recent map_state
+        # Get the map size from the most recent map_state
         self.map_width = self.get_map_state()['map']['width']
         self.map_height = self.get_map_state()['map']['height']
 
     def get_map_resources(self):
         response = requests.get(f'{self.base_url}/play/mapResource', headers=self.headers)
         response.raise_for_status()
-        print(response.json())
         return response.json()
 
     def get_map_state(self):
         response = requests.get(f'{self.base_url}/play/mapState', headers=self.headers)
         response.raise_for_status()
-        print(response.json())
+        print("CALL MapState")
         return response.json()
 
     def approve_hero_turn(self, action):
         data = {'action': action}
         response = requests.post(f'{self.base_url}/play/approveHeroTurn', headers=self.headers, json=data)
-        print(response.json())
         response.raise_for_status()
         return response.json()
 
@@ -47,20 +52,21 @@ class PonyPanicClient:
     def reset_level(self):
         
         response = requests.post(f'{self.base_url}/story/resetLevel', headers=self.headers, json=self.data)
-        print(response.json())
         response.raise_for_status()
         return response.json()
 
     def get_playthrough_state(self):
         response = requests.get(f'{self.base_url}/story/playthroughState', headers=self.headers)
         response.raise_for_status()
-        print(response.json())
         return response.json()
 
     # A* Pathfinding Algorithm
-    def a_star(self, start, goal):
+    def a_star(self, start, goal, map_state):
         def heuristic(a, b):
-            return abs(a['x'] - b['x']) + abs(a['y'] - b['y'])  # Manhattan distance
+            # Manhattan distance with additional negative cost for proximity to threats
+            base_cost = abs(a['x'] - b['x']) + abs(a['y'] - b['y'])
+            threat_cost = -self.get_proximity_cost(a, map_state)  # Negative cost to encourage distance from threats
+            return base_cost + threat_cost
         
         open_list = []
         heapq.heappush(open_list, (0, tuple(start.values())))
@@ -127,25 +133,26 @@ class PonyPanicClient:
         path.reverse()
         return path
     
-    def get_move_direction(self, hero_pos, target_pos):
-        path = self.a_star(hero_pos, target_pos)
+    def get_move_direction(self, hero_pos, target_pos, map_state):
+        path = self.a_star(hero_pos, target_pos, map_state)
         if path:
             print("Found path:", path)
             if len(path) >= 1:
-                print("PATH: ", path)
                 next_step = path[0]
                 if next_step['x'] > hero_pos['x']:
                     print("NEXT STEP POS", next_step['x'], next_step['y'], hero_pos['x'], hero_pos['y'])
                     return "MOVE_RIGHT"
                 elif next_step['x'] < hero_pos['x']:
-                    print("NEXT STEP POS", next_step['x'], hero_pos['x'])
+                    print("NEXT STEP POS", next_step['x'], next_step['y'], hero_pos['x'], hero_pos['y'])
                     return "MOVE_LEFT"
                 elif next_step['y'] > hero_pos['y']:
-                    print("NEXT STEP POS", next_step['y'], hero_pos['y'])
+                    print("NEXT STEP POS", next_step['x'], next_step['y'], hero_pos['x'], hero_pos['y'])
                     return "MOVE_UP"
                 elif next_step['y'] < hero_pos['y']:
-                    print("NEXT STEP POS", next_step['y'], hero_pos['y'])
+                    print("NEXT STEP POS", next_step['x'], next_step['y'], hero_pos['x'], hero_pos['y'])
                     return "MOVE_DOWN"
+        else:
+            print("No valid path found from", hero_pos, "to", target_pos)
         return "NOTHING"
     
     def get_enemy_positions(self, map_state):
@@ -235,46 +242,36 @@ class PonyPanicClient:
             treasures = map_state['map']['treasures']
             noncollected_treasures = [t for t in treasures if t['collectedByHeroId'] is None]
 
-            # Check if there's an enemy nearby to kick ass
-            for enemy in enemies:
-                if 0 < self.calculate_distance(hero, enemy) <= 2 and self.get_enemy_health(map_state)[0] > 0:
-                    action = self.get_kick_direction(hero, enemy)
-                    print(f"Enemy nearby! Action: {action}")
-                    print(f"Enemy helth: {self.get_enemy_health(map_state)}")
-                    self.approve_hero_turn(action)
-                    break
-
-            # Check if there's a bullet threatening a hero
+            # Recalculate the optimal move direction to avoid enemies and bullets
+            action = None
+            if noncollected_treasures:
+                # Move towards the nearest treasure
+                target = noncollected_treasures[0]['position']
+                action = self.get_move_direction(hero, target, map_state)
             else:
-                for bullet in bullets:
-                    if self.is_bullet_threatening(hero, bullet):
-                        print("Bullet nearby! Action: USE_SHIELD")
-                        self.approve_hero_turn("USE_SHIELD")
-                        break
-
-                # If no threats, move towards the nearest treasure
-                else:
-                    if noncollected_treasures:
-                        target = min(noncollected_treasures, key=lambda t: self.calculate_distance(hero, t['position']))
-                        action = self.get_move_direction(hero, target['position'])
-                        print("Action:", action)
-                        try:
-                            self.approve_hero_turn(action)
-                        except requests.exceptions.HTTPError as e:
-                            if e.response.status_code == 409:
-                                error_data = e.response.json()
-                                if error_data.get('subName') == 'GAME_ON_MAP_IS_ALREADY_OVER':
-                                    print("Game already over. Resetting level...")
-                                    self.reset_level()
-                                else:
-                                    raise
-
-                    else:
-                        print("There are NO treasures, staying put.")
-                        self.approve_hero_turn("NOTHING")
+                action = "NOTHING"  # Stand still if there are no treasures left
+            
+            # Execute the action
+            if action:
+                print(f"Action: {action}")
+                self.approve_hero_turn(action)
+            else:
+                print("No action to perform. Waiting...")
+                break
     
     def calculate_distance(self, pos1, pos2):
         return abs(pos1['x'] - pos2['x']) + abs(pos1['y'] - pos2['y'])
+    
+    def get_proximity_cost(self, pos, map_state):
+        """Calculate a cost inversely proportional to the distance from enemies and bullets."""
+        enemies = self.get_enemy_positions(map_state)
+        bullets = self.get_bullet_positions(map_state)
+
+        min_distance_enemy = min((self.calculate_distance(pos, enemy) for enemy in enemies), default=float('inf'))
+        min_distance_bullet = min((self.calculate_distance(pos, bullet) for bullet in bullets), default=float('inf'))
+
+        # Cost is higher when closer to threats
+        return 10 / (min_distance_enemy + 1) + 5 / (min_distance_bullet + 1)  # Adjust weights
 
 if __name__ == "__main__":
     STORY_PLAYTHROUGH_TOKEN = "4352_I2ptMlc4Yj9IZTRza1RvV1lGaX1iSUZ3PXYpLDw0T1ZgT1JQLkI8YUY="
